@@ -1,13 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import type { Cadence, Profile, ProofType, Status, Task, TaskDraft } from "@/lib/types";
+import type { Cadence, Profile, Project, ProjectGroup, ProofType, Status, Task, TaskDraft } from "@/lib/types";
 
 interface Props {
   task?: Task;
   /** Pre-filled day when adding from the week view. */
   date?: string;
+  /** Pre-picked project when adding from the Projects section. */
+  projectId?: string;
   profiles: Profile[];
+  /** Live groups and projects. Empty until there is somewhere to file a task. */
+  groups: ProjectGroup[];
+  projects: Project[];
   onSave(draft: TaskDraft): Promise<void>;
   onClose(): void;
 }
@@ -19,7 +24,7 @@ const POINT_CHIPS = [
 ];
 const TIME_CHIPS = [15, 30, 60];
 
-export function TaskEditor({ task, date, profiles, onSave, onClose }: Props) {
+export function TaskEditor({ task, date, projectId, profiles, groups, projects, onSave, onClose }: Props) {
   const [title, setTitle] = useState(task?.title ?? "");
   const [notes, setNotes] = useState(task?.notes ?? "");
   const [points, setPoints] = useState(String(task?.points ?? 5));
@@ -32,11 +37,15 @@ export function TaskEditor({ task, date, profiles, onSave, onClose }: Props) {
     task && task.status !== "done" ? task.status : date ? "ready" : "backlog",
   );
   const [repeat, setRepeat] = useState<Cadence | "none">("none");
+  const [project, setProject] = useState(task?.project_id ?? projectId ?? "");
+  const [deadline, setDeadline] = useState(task?.deadline ?? "");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   const isInstance = !!task?.recurring_rule_id;
   const showLane = !isInstance && task?.status !== "done" && repeat === "none";
+  // One-off tasks only: a repeating task has no finish line to file under a project.
+  const oneOff = !isInstance && repeat === "none";
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -59,6 +68,8 @@ export function TaskEditor({ task, date, profiles, onSave, onClose }: Props) {
         remind_at: remind || null,
         status,
         repeat,
+        project_id: oneOff ? project || null : null,
+        deadline: oneOff ? deadline || null : null,
       });
       onClose();
     } catch (err) {
@@ -135,6 +146,31 @@ export function TaskEditor({ task, date, profiles, onSave, onClose }: Props) {
             <div className="field">
               <label htmlFor="fPlanned">Planned day (optional)</label>
               <input id="fPlanned" type="date" value={planned} onChange={(e) => setPlanned(e.target.value)} />
+            </div>
+          )}
+          {oneOff && (
+            <div className="field">
+              <label htmlFor="fDeadline">Finish by (optional)</label>
+              <input id="fDeadline" type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
+            </div>
+          )}
+          {oneOff && projects.length > 0 && (
+            <div className="field">
+              <label htmlFor="fProject">Project (optional)</label>
+              <select id="fProject" value={project} onChange={(e) => setProject(e.target.value)}>
+                <option value="">No project</option>
+                {groups.map((g) => (
+                  <optgroup key={g.id} label={g.name}>
+                    {projects
+                      .filter((p) => p.group_id === g.id)
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                  </optgroup>
+                ))}
+              </select>
             </div>
           )}
           <div className="field">

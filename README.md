@@ -17,6 +17,9 @@ Built with Next.js, Supabase and DnD Kit. Deployed on Vercel.
 - **Add, edit, delete, restore:** deleted tasks sit in a Deleted list until restored.
 - **Live sync:** changes show up on the other device within a second or so.
 - **Login:** email and password, with an optional second step by authenticator app or text message.
+- **Projects:** groups hold projects, projects hold tasks (House Projects, Closets, "Buy rod for the front hall closet"). Project tasks are regular tasks with points and proof, plus an optional finish-by date.
+- **Shopping list:** one shared list, optionally sorted by store. Tick items off as you buy them.
+- **Personal goals:** "a number of times a week" (gym) or "working toward a date" (a race, a certificate). Logging a session earns points, once a day per goal, with no photo. Goals can belong to one person or both.
 - **Light and dark mode.**
 
 ## Not built yet
@@ -33,7 +36,7 @@ Create a project at supabase.com. From Project Settings, API, copy the project U
 
 ### 2. Create the database
 
-Open the SQL editor, paste the contents of `supabase/migrations/0001_init.sql`, and run it once.
+Open the SQL editor, paste the contents of `supabase/migrations/0001_init.sql`, and run it once. Then do the same with `supabase/migrations/0002_projects_shopping_goals.sql`, which adds projects, the shopping list and goals. Until 0002 is run, the board works and those three sections show a setup notice.
 
 ### 3. Create the two accounts
 
@@ -92,9 +95,13 @@ Periods use Pacific time. To change that, edit `period_start` in the migration.
 
 ```
 supabase/migrations/0001_init.sql   tables, access rules, storage bucket, functions
+supabase/migrations/0002_...sql     projects, shopping list, goals
 src/proxy.ts                        session refresh and sign-in redirects
 src/app/                            pages: board, login, second step, account
-src/components/BarrettApp.tsx       data loading, live sync, scoreboard, both views
+src/components/BarrettApp.tsx       data loading, live sync, scoreboard, board and week views
+src/components/ProjectsView.tsx     groups, projects and their tasks
+src/components/ShoppingView.tsx     shopping list
+src/components/GoalsView.tsx        personal goals and session logging
 src/components/                     cards, lanes, task editor, proof dialog
 src/lib/                            Supabase clients, types, date and image helpers
 ```

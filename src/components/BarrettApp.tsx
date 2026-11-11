@@ -10,10 +10,15 @@ import {
   type Cadence,
   type Completion,
   type FocusSession,
+  type Goal,
+  type GoalCheckin,
   type Period,
   type Prize,
   type Profile,
+  type Project,
+  type ProjectGroup,
   type Rule,
+  type ShoppingItem,
   type Status,
   type Task,
   type TaskDraft,
@@ -22,6 +27,17 @@ import { DragArea, Lane } from "./Lanes";
 import { TaskCard, type CardActions } from "./TaskCard";
 import { TaskEditor } from "./TaskEditor";
 import { ProofDialog } from "./ProofDialog";
+import { ProjectsView, type ProjectActions } from "./ProjectsView";
+import { ShoppingView, type ShoppingActions } from "./ShoppingView";
+import { GoalsView, type GoalActions } from "./GoalsView";
+
+type Tab = "tasks" | "projects" | "shopping" | "goals";
+const TABS: { id: Tab; title: string }[] = [
+  { id: "tasks", title: "Tasks" },
+  { id: "projects", title: "Projects" },
+  { id: "shopping", title: "Shopping" },
+  { id: "goals", title: "Goals" },
+];
 
 interface Toast {
   head: string;
@@ -46,14 +62,22 @@ export default function BarrettApp({ me, profiles }: { me: Profile; profiles: Pr
   const [rules, setRules] = useState<Rule[]>([]);
   const [sessions, setSessions] = useState<FocusSession[]>([]);
   const [prizes, setPrizes] = useState<Prize[]>([]);
+  const [groups, setGroups] = useState<ProjectGroup[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [shopping, setShopping] = useState<ShoppingItem[]>([]);
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [checkins, setCheckins] = useState<GoalCheckin[]>([]);
+  /** Why projects, shopping and goals are unavailable: the 0002 migration has not been run yet. */
+  const [extrasError, setExtrasError] = useState("");
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState("");
 
+  const [tab, setTab] = useState<Tab>("tasks");
   const [view, setView] = useState<"board" | "week">("board");
   const [period, setPeriod] = useState<Period>("week");
   const [weekOffset, setWeekOffset] = useState(0);
-  const [editor, setEditor] = useState<{ task?: Task; date?: string } | null>(null);
+  const [editor, setEditor] = useState<{ task?: Task; date?: string; projectId?: string } | null>(null);
   const [proofFor, setProofFor] = useState<Task | null>(null);
   const [showTrash, setShowTrash] = useState(false);
   const [showRules, setShowRules] = useState(false);
@@ -65,12 +89,19 @@ export default function BarrettApp({ me, profiles }: { me: Profile; profiles: Pr
   const load = useCallback(async () => {
     // Everything open, plus finished work back to the start of last month's final week.
     const since = addDays(monthStart(new Date()), -8).toISOString();
-    const [t, c, r, f, p] = await Promise.all([
+    const [t, c, r, f, p, pt, g, pr, sh, go, gc] = await Promise.all([
       sb.from("tasks").select("*").or(`completed_at.is.null,completed_at.gte.${since}`).order("created_at"),
       sb.from("task_completions").select("*").gte("completed_at", since),
       sb.from("recurring_rules").select("id, title, points, cadence, active").eq("active", true).order("created_at"),
       sb.from("focus_sessions").select("*").is("ended_at", null),
       sb.from("prizes").select("*"),
+      // Project tasks of any age, so a project's progress counts work finished long ago.
+      sb.from("tasks").select("*").not("project_id", "is", null),
+      sb.from("project_groups").select("*").order("created_at"),
+      sb.from("projects").select("*").order("created_at"),
+      sb.from("shopping_items").select("*").order("created_at"),
+      sb.from("goals").select("*").order("created_at"),
+      sb.from("goal_checkins").select("*").gte("done_on", ymd(addDays(new Date(), -182))),
     ]);
     const failed = t.error ?? c.error ?? r.error ?? f.error ?? p.error;
     if (failed) {
@@ -78,8 +109,20 @@ export default function BarrettApp({ me, profiles }: { me: Profile; profiles: Pr
       return;
     }
     setLoadError("");
-    const list = (t.data ?? []) as Task[];
+    // The newer sections load separately, so the board still works before their migration is run.
+    const extra = pt.error ?? g.error ?? pr.error ?? sh.error ?? go.error ?? gc.error;
+    setExtrasError(extra ? extra.message : "");
+    const byId = new Map<string, Task>();
+    for (const row of [...((t.data ?? []) as Task[]), ...((extra ? [] : (pt.data ?? [])) as Task[])]) byId.set(row.id, row);
+    const list = [...byId.values()].sort((a, b) => a.created_at.localeCompare(b.created_at));
     setTasks(list);
+    if (!extra) {
+      setGroups((g.data ?? []) as ProjectGroup[]);
+      setProjects((pr.data ?? []) as Project[]);
+      setShopping((sh.data ?? []) as ShoppingItem[]);
+      setGoals((go.data ?? []) as Goal[]);
+      setCheckins((gc.data ?? []) as GoalCheckin[]);
+    }
     setCompletions((c.data ?? []) as Completion[]);
     setRules((r.data ?? []) as Rule[]);
     setSessions((f.data ?? []) as FocusSession[]);
@@ -151,8 +194,10 @@ export default function BarrettApp({ me, profiles }: { me: Profile; profiles: Pr
   const myFocusTask = myFocus ? tasks.find((t) => t.id === myFocus.task_id) : undefined;
 
   const scoreStart = period === "week" ? weekStart(now) : monthStart(now);
+  const scoreDay = ymd(scoreStart);
   const score = (id: string) =>
-    completions.filter((c) => c.user_id === id && new Date(c.completed_at) >= scoreStart).reduce((n, c) => n + c.points, 0);
+    completions.filter((c) => c.user_id === id && new Date(c.completed_at) >= scoreStart).reduce((n, c) => n + c.points, 0) +
+    checkins.filter((k) => k.user_id === id && k.done_on >= scoreDay).reduce((n, k) => n + k.points, 0);
   const left = profiles[0];
   const right = profiles[1];
   const leftPts = left ? score(left.id) : 0;
@@ -177,6 +222,12 @@ export default function BarrettApp({ me, profiles }: { me: Profile; profiles: Pr
     if (t.status === "done" && (t.due_date ?? "") < start) return [];
     return [{ task: t, rule, rolled: t.status !== "done" && (t.due_date ?? start) < start }];
   });
+
+  const liveGroups = groups.filter((x) => !x.deleted_at);
+  const groupById = new Map(liveGroups.map((x) => [x.id, x]));
+  const liveProjects = projects.filter((x) => !x.deleted_at && groupById.has(x.group_id));
+  const projectLabel = new Map(liveProjects.map((x) => [x.id, `${groupById.get(x.group_id)?.name} · ${x.name}`]));
+  const toBuy = shopping.filter((i) => !i.bought_at).length;
 
   const boardCutoff = addDays(now, -14).toISOString();
   const boardTasks = live.filter(
@@ -259,6 +310,8 @@ export default function BarrettApp({ me, profiles }: { me: Profile; profiles: Pr
       planned_date: draft.planned_date,
       estimate_minutes: draft.estimate_minutes,
       remind_at: draft.remind_at,
+      // These columns only exist once the 0002 migration has been run.
+      ...(extrasError ? {} : { project_id: draft.project_id, deadline: draft.deadline }),
     };
     let error: { message: string } | null;
     if (existing) {
@@ -323,6 +376,111 @@ export default function BarrettApp({ me, profiles }: { me: Profile; profiles: Pr
     await write("The prize could not be saved.", sb.from("prizes").upsert({ period, description: text }));
   }
 
+  // ------------------------------------------------------------ projects, shopping, goals
+
+  /** Like write, but throws so an open dialog can show what went wrong. */
+  async function must(what: string, op: PromiseLike<{ error: { message: string } | null }>) {
+    const { error } = await op;
+    if (error) throw new Error(`${what} ${error.message}`);
+    await load();
+  }
+
+  const stamp = () => new Date().toISOString();
+
+  const projectActions: ProjectActions = {
+    addTask: (projectId) => setEditor({ projectId }),
+    editTask: (task) => setEditor({ task }),
+    finishTask: (task) => setProofFor(task),
+    saveGroup: (name, existing) =>
+      must(
+        "The group could not be saved.",
+        existing
+          ? sb.from("project_groups").update({ name }).eq("id", existing.id)
+          : sb.from("project_groups").insert({ name, created_by: me.id }),
+      ),
+    saveProject: (draft, existing) => {
+      const fields = { name: draft.name, group_id: draft.group_id, notes: draft.notes || null, target_date: draft.target_date };
+      return must(
+        "The project could not be saved.",
+        existing ? sb.from("projects").update(fields).eq("id", existing.id) : sb.from("projects").insert({ ...fields, created_by: me.id }),
+      );
+    },
+    restoreGroup: (group) =>
+      void write("The group could not be restored.", sb.from("project_groups").update({ deleted_at: null }).eq("id", group.id)),
+    restoreProject: (project) =>
+      void write("The project could not be restored.", sb.from("projects").update({ deleted_at: null }).eq("id", project.id)),
+    // Deleting a group or project keeps its tasks. They stay on the board and come back with it on restore.
+    async removeGroup(group) {
+      const ok = await write("The group could not be deleted.", sb.from("project_groups").update({ deleted_at: stamp() }).eq("id", group.id));
+      if (ok) setToast({ head: "Deleted", msg: `"${group.name}". Its tasks stay on the board.`, action: { label: "Undo", run: () => projectActions.restoreGroup(group) } });
+    },
+    async removeProject(project) {
+      const ok = await write("The project could not be deleted.", sb.from("projects").update({ deleted_at: stamp() }).eq("id", project.id));
+      if (ok) setToast({ head: "Deleted", msg: `"${project.name}". Its tasks stay on the board.`, action: { label: "Undo", run: () => projectActions.restoreProject(project) } });
+    },
+  };
+
+  const shoppingActions: ShoppingActions = {
+    add: (title, store) =>
+      write("The item could not be added.", sb.from("shopping_items").insert({ title, store: store || null, added_by: me.id })),
+    toggle(item) {
+      const next = item.bought_at ? { bought_at: null, bought_by: null } : { bought_at: stamp(), bought_by: me.id };
+      setShopping((list) => list.map((i) => (i.id === item.id ? { ...i, ...next } : i)));
+      void write("The item could not be updated.", sb.from("shopping_items").update(next).eq("id", item.id));
+    },
+    async remove(item) {
+      const ok = await write("The item could not be removed.", sb.from("shopping_items").delete().eq("id", item.id));
+      if (!ok) return;
+      const { id, ...rest } = item;
+      setToast({
+        head: "Removed",
+        msg: `"${item.title}"`,
+        action: { label: "Undo", run: () => void write("The item could not be put back.", sb.from("shopping_items").insert({ id, ...rest })) },
+      });
+    },
+    clearBought: () => void write("The list could not be cleared.", sb.from("shopping_items").delete().not("bought_at", "is", null)),
+  };
+
+  const goalActions: GoalActions = {
+    save: (draft, existing) => {
+      const fields = { ...draft, notes: draft.notes || null };
+      return must(
+        "The goal could not be saved.",
+        existing ? sb.from("goals").update(fields).eq("id", existing.id) : sb.from("goals").insert({ ...fields, created_by: me.id }),
+      );
+    },
+    async checkIn(goal, date) {
+      const ok = await write(
+        "The session could not be logged.",
+        sb.from("goal_checkins").insert({ goal_id: goal.id, user_id: me.id, kind: "checkin", done_on: date, points: goal.checkin_points }),
+      );
+      if (ok) setToast({ head: goal.checkin_points ? "Points banked" : "Logged", msg: `${goal.checkin_points ? `+${goal.checkin_points} for ` : ""}"${goal.title}".` });
+    },
+    undoCheckIn: (checkin) => void write("The session could not be removed.", sb.from("goal_checkins").delete().eq("id", checkin.id)),
+    async achieve(goal) {
+      // Everyone on the goal gets the finish points: one person, or both for a shared goal.
+      const who = goal.owner_id ? [goal.owner_id] : profiles.map((x) => x.id);
+      const rows = who.map((user_id) => ({ goal_id: goal.id, user_id, kind: "finish", done_on: today, points: goal.finish_points }));
+      const ok = await write("The goal could not be closed.", sb.from("goal_checkins").insert(rows));
+      if (!ok) return;
+      await write("The goal could not be closed.", sb.from("goals").update({ achieved_at: stamp() }).eq("id", goal.id));
+      setToast({ head: "Goal achieved", msg: `"${goal.title}"${goal.finish_points ? ` +${goal.finish_points}${who.length > 1 ? " each" : ""}` : ""}. Nice work.` });
+    },
+    async reopen(goal) {
+      const ok = await write("The goal could not be reopened.", sb.from("goal_checkins").delete().eq("goal_id", goal.id).eq("kind", "finish"));
+      if (ok) await write("The goal could not be reopened.", sb.from("goals").update({ achieved_at: null }).eq("id", goal.id));
+    },
+    async remove(goal) {
+      const ok = await write("The goal could not be deleted.", sb.from("goals").update({ deleted_at: stamp() }).eq("id", goal.id));
+      if (!ok) return;
+      setToast({
+        head: "Deleted",
+        msg: `"${goal.title}"`,
+        action: { label: "Undo", run: () => void write("The goal could not be restored.", sb.from("goals").update({ deleted_at: null }).eq("id", goal.id)) },
+      });
+    },
+  };
+
   function toggleTheme() {
     const root = document.documentElement;
     const dark = root.dataset.theme
@@ -355,6 +513,7 @@ export default function BarrettApp({ me, profiles }: { me: Profile; profiles: Pr
       doneBy={doneBy.get(task.id) ?? []}
       focusedBy={focusByTask.get(task.id)}
       proofUrl={task.proof_path ? urls[task.proof_path] : undefined}
+      projectName={task.project_id ? projectLabel.get(task.project_id) : undefined}
       compact={compact}
       actions={actions}
     />
@@ -397,6 +556,44 @@ export default function BarrettApp({ me, profiles }: { me: Profile; profiles: Pr
 
       {myFocus && myFocusTask && <FocusBar title={myFocusTask.title} startedAt={myFocus.started_at} onStop={stopFocus} />}
 
+      <nav className="tabs" aria-label="Sections">
+        {TABS.map((x) => (
+          <button key={x.id} aria-pressed={tab === x.id} onClick={() => setTab(x.id)}>
+            {x.title}
+            {x.id === "shopping" && toBuy > 0 && <span className="n">{toBuy}</span>}
+          </button>
+        ))}
+      </nav>
+
+      {tab !== "tasks" && extrasError && (
+        <div className="panel" role="alert">
+          <span className="label">One-time setup needed</span>
+          <p>
+            Projects, the shopping list and goals need a database update. In Supabase, open the SQL editor, paste the
+            contents of <code>supabase/migrations/0002_projects_shopping_goals.sql</code>, run it once, then reload this page.
+          </p>
+          <p className="note">{extrasError}</p>
+        </div>
+      )}
+      {tab === "projects" && !extrasError && (
+        <ProjectsView
+          groups={groups}
+          projects={projects}
+          tasks={live}
+          people={people}
+          doneBy={doneBy}
+          today={today}
+          loaded={loaded}
+          actions={projectActions}
+        />
+      )}
+      {tab === "shopping" && !extrasError && <ShoppingView items={shopping} people={people} loaded={loaded} actions={shoppingActions} />}
+      {tab === "goals" && !extrasError && (
+        <GoalsView goals={goals} checkins={checkins} me={me} profiles={profiles} today={today} loaded={loaded} actions={goalActions} />
+      )}
+
+      {tab === "tasks" && (
+      <>
       <section className="score" aria-label="Score">
         <div className="duel">
           <div className="duelhead">
@@ -541,7 +738,7 @@ export default function BarrettApp({ me, profiles }: { me: Profile; profiles: Pr
       <section className="stack">
         <div className="sectionhead">
           <div className="row">
-            <h2>Tasks and projects</h2>
+            <h2>Board</h2>
             <div className="seg" role="group" aria-label="View">
               <button aria-pressed={view === "board"} onClick={() => setView("board")}>
                 Board
@@ -661,12 +858,17 @@ export default function BarrettApp({ me, profiles }: { me: Profile; profiles: Pr
           Drag a card to move it. On a phone, press and hold first. Closing a task needs a quick photo or screenshot.
         </p>
       </section>
+      </>
+      )}
 
       {editor && (
         <TaskEditor
           task={editor.task}
           date={editor.date}
+          projectId={editor.projectId}
           profiles={profiles}
+          groups={liveGroups}
+          projects={liveProjects}
           onSave={(draft) => save(draft, editor.task)}
           onClose={() => setEditor(null)}
         />
