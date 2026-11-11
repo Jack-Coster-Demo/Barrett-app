@@ -1,6 +1,6 @@
 "use client";
 
-import { clock, dayLabel, fromYmd, minutesLabel } from "@/lib/dates";
+import { clock, dayLabel, fromYmd, minutesLabel, ymd } from "@/lib/dates";
 import { LANES, type Profile, type Status, type Task } from "@/lib/types";
 import { Draggable } from "./Lanes";
 
@@ -22,11 +22,13 @@ interface Props {
   /** Whoever has a focus timer running on this task. */
   focusedBy?: Profile;
   proofUrl?: string;
+  /** "Group · Project" when the task belongs to a project. */
+  projectName?: string;
   compact?: boolean;
   actions: CardActions;
 }
 
-export function TaskCard({ task, me, people, doneBy, focusedBy, proofUrl, compact, actions }: Props) {
+export function TaskCard({ task, me, people, doneBy, focusedBy, proofUrl, projectName, compact, actions }: Props) {
   const done = task.status === "done";
   const lane = LANES.findIndex((l) => l.id === task.status);
   const owner = task.owner_id ? people.get(task.owner_id) : undefined;
@@ -48,6 +50,10 @@ export function TaskCard({ task, me, people, doneBy, focusedBy, proofUrl, compac
       )}
       {!done && task.estimate_minutes ? <span className="pill">{minutesLabel(task.estimate_minutes)}</span> : null}
       {!done && !compact && task.planned_date ? <span className="pill">{dayLabel(fromYmd(task.planned_date))}</span> : null}
+      {!done && task.deadline ? (
+        <span className={`pill ${task.deadline < ymd(new Date()) ? "late" : ""}`}>By {dayLabel(fromYmd(task.deadline))}</span>
+      ) : null}
+      {projectName && !compact ? <span className="pill">{projectName}</span> : null}
       {!done && task.remind_at ? <span className="pill">Remind {clock(task.remind_at)}</span> : null}
       {!done && flagger && task.flag_kind ? (
         <span className="pill flag">

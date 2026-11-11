@@ -46,3 +46,8 @@ export function minutesLabel(n: number): string {
   const m = n % 60;
   return m ? `${h} h ${m} min` : `${h} h`;
 }
+
+/** Whole days from one "YYYY-MM-DD" to another. Negative when `to` is in the past. */
+export function daysBetween(from: string, to: string): number {
+  return Math.round((fromYmd(to).getTime() - fromYmd(from).getTime()) / 86400000);
+}
