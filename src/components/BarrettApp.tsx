@@ -67,7 +67,7 @@ export default function BarrettApp({ me, profiles }: { me: Profile; profiles: Pr
   const [shopping, setShopping] = useState<ShoppingItem[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [checkins, setCheckins] = useState<GoalCheckin[]>([]);
-  /** Why projects, shopping and goals are unavailable: the 0002 migration has not been run yet. */
+  /** Why projects, shopping and goals are unavailable: their migration has not reached this database yet. */
   const [extrasError, setExtrasError] = useState("");
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [loaded, setLoaded] = useState(false);
@@ -567,10 +567,11 @@ export default function BarrettApp({ me, profiles }: { me: Profile; profiles: Pr
 
       {tab !== "tasks" && extrasError && (
         <div className="panel" role="alert">
-          <span className="label">One-time setup needed</span>
+          <span className="label">Database update pending</span>
           <p>
-            Projects, the shopping list and goals need a database update. In Supabase, open the SQL editor, paste the
-            contents of <code>supabase/migrations/0002_projects_shopping_goals.sql</code>, run it once, then reload this page.
+            Projects, the shopping list and goals need a database update that has not reached this database yet. It is
+            applied automatically on each production deploy. If this notice stays after a reload, open the latest build
+            log in Vercel and look for the lines starting with <code>migrate:</code>.
           </p>
           <p className="note">{extrasError}</p>
         </div>

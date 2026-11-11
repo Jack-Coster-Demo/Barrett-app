@@ -36,7 +36,7 @@ Create a project at supabase.com. From Project Settings, API, copy the project U
 
 ### 2. Create the database
 
-Open the SQL editor, paste the contents of `supabase/migrations/0001_init.sql`, and run it once. Then do the same with `supabase/migrations/0002_projects_shopping_goals.sql`, which adds projects, the shopping list and goals. Until 0002 is run, the board works and those three sections show a setup notice.
+Nothing to do by hand on Vercel: every production deploy applies any new file in `supabase/migrations/` before it builds (see "Database changes" below). For a database that is not connected to Vercel, run `MIGRATE_DATABASE_URL=postgres://... npm run migrate`.
 
 ### 3. Create the two accounts
 
@@ -85,6 +85,18 @@ In Supabase, Authentication, URL Configuration, set the Site URL to the Vercel a
 
 Open the Vercel address in Safari, tap Share, then Add to Home Screen. This gives it its own icon and full screen, and it is required later for push notifications on iPhone.
 
+## Database changes
+
+The live database is the Supabase project that the Vercel Supabase integration created and connected to this Vercel project (`new-barrett-app`). The integration manages the environment variables, so the app and the migration step always point at the same database.
+
+To change the schema, add a file to `supabase/migrations/` named with the next number, for example `0003_what_it_does.sql`, and merge it to main. During the production build, `scripts/migrate.mjs` connects with `POSTGRES_URL_NON_POOLING`, applies any file it has not applied before, and records it in `supabase_migrations.schema_migrations`. All pending files run in one transaction. If one fails, nothing changes, the build fails and the previous deployment stays live. The build log shows what happened on the lines starting with `migrate:`.
+
+Rules that keep this safe:
+
+- Never edit a migration that has already been deployed. Add a new one.
+- Do not paste migrations into the Supabase SQL editor. If you do, the deploy will try to run the same file again and fail on "already exists".
+- Preview deploys use the same database and do not run migrations, so a branch that needs a new table shows its setup notice until it is merged.
+
 ## How recurring tasks work
 
 Each repeating task is a rule. When the app loads, it asks the database to create this period's copy of every rule (`generate_recurring`). If the last copy was never finished, no new one is made and the old one stays open, marked as rolled over. Finishing a rolled-over task counts for the period it was finished in.
@@ -104,4 +116,5 @@ src/components/ShoppingView.tsx     shopping list
 src/components/GoalsView.tsx        personal goals and session logging
 src/components/                     cards, lanes, task editor, proof dialog
 src/lib/                            Supabase clients, types, date and image helpers
+scripts/migrate.mjs                 applies new migrations during the production build
 ```
