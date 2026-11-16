@@ -11,14 +11,14 @@ Built with Next.js, Supabase and DnD Kit. Deployed on Vercel.
 - **Points:** suggested values of 5, 10 and 20, editable per task. Either person can flag a value as too high or too low.
 - **Proof:** a photo or screenshot is required to close a task. Photos go to a private storage bucket.
 - **Shared credit:** pick who did it when closing: you, the other person, or together (both get the points).
-- **Recurring tasks:** daily, weekly or monthly. An unfinished one rolls over until it is done.
+- **Recurring tasks:** daily, weekly or monthly. A weekly task can be tied to a day, such as weekly on Tuesday. An unfinished one rolls over until it is done.
 - **Focus timer:** start and stop on any In progress task. The other person sees who is on what.
 - **Recap and prizes:** week and month totals with an editable prize for each.
 - **Add, edit, delete, restore:** deleted tasks sit in a Deleted list until restored.
 - **Live sync:** changes show up on the other device within a second or so.
 - **Login:** email and password, with an optional second step by authenticator app or text message.
-- **Projects:** groups hold projects, projects hold tasks (House Projects, Closets, "Buy rod for the front hall closet"). Project tasks are regular tasks with points and proof, plus an optional finish-by date.
-- **Shopping list:** one shared list, optionally sorted by store. Tick items off as you buy them.
+- **Projects:** groups hold projects, projects hold tasks (House Projects, Closets, "Buy rod for the front hall closet"). Project tasks are regular tasks with points and proof, plus an optional finish-by date. A task can be filed under a project, or start a new one, from the task editor.
+- **Shopping list:** one shared list, optionally sorted by store, with an optional link per item. Edit an item to change its name, store or link. Tick the checkbox when an item has been purchased.
 - **Personal goals:** "a number of times a week" (gym) or "working toward a date" (a race, a certificate). Logging a session earns points, once a day per goal, with no photo. Goals can belong to one person or both.
 - **Light and dark mode.**
 
@@ -108,6 +108,8 @@ Periods use Pacific time. To change that, edit `period_start` in the migration.
 ```
 supabase/migrations/0001_init.sql   tables, access rules, storage bucket, functions
 supabase/migrations/0002_...sql     projects, shopping list, goals
+supabase/migrations/0003_...sql     link on shopping items
+supabase/migrations/0004_...sql     day of the week for weekly repeats
 src/proxy.ts                        session refresh and sign-in redirects
 src/app/                            pages: board, login, second step, account
 src/components/BarrettApp.tsx       data loading, live sync, scoreboard, board and week views

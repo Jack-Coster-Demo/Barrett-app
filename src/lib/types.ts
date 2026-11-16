@@ -48,6 +48,8 @@ export interface Rule {
   points: number;
   cadence: Cadence;
   active: boolean;
+  /** Weekly rules only: 1 = Monday ... 7 = Sunday. Null or missing = any day that week. */
+  weekday?: number | null;
 }
 
 export interface FocusSession {
@@ -75,7 +77,11 @@ export interface TaskDraft {
   remind_at: string | null;
   status: Exclude<Status, "done">;
   repeat: Cadence | "none";
+  /** Day for a weekly repeat: 1 = Monday ... 7 = Sunday, null = any day that week. */
+  weekday: number | null;
   project_id: string | null;
+  /** Set when the task should go into a project that does not exist yet. */
+  new_project: { name: string; group_id: string | null; group_name: string } | null;
   deadline: string | null;
 }
 
@@ -105,6 +111,8 @@ export interface ShoppingItem {
   id: string;
   title: string;
   store: string | null;
+  /** Optional web address for the item, always http or https. */
+  link: string | null;
   added_by: string | null;
   bought_at: string | null;
   bought_by: string | null;

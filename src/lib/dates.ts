@@ -25,6 +25,13 @@ export function weekStart(d: Date): Date {
   return x;
 }
 
+export const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+/** 1 = Monday ... 7 = Sunday -> "Tuesday" */
+export function weekdayName(n: number): string {
+  return WEEKDAYS[n - 1] ?? "";
+}
+
 export function monthStart(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), 1);
 }

@@ -1,10 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import type { Cadence, Profile, Project, ProjectGroup, ProofType, Status, Task, TaskDraft } from "@/lib/types";
+import { WEEKDAYS } from "@/lib/dates";
+import type { Cadence, Profile, Project, ProjectGroup, ProofType, Rule, Status, Task, TaskDraft } from "@/lib/types";
 
 interface Props {
   task?: Task;
+  /** The repeat this task is a copy of, when it is one. */
+  rule?: Rule;
   /** Pre-filled day when adding from the week view. */
   date?: string;
   /** Pre-picked project when adding from the Projects section. */
@@ -13,6 +16,8 @@ interface Props {
   /** Live groups and projects. Empty until there is somewhere to file a task. */
   groups: ProjectGroup[];
   projects: Project[];
+  /** False while the projects tables are not in the database yet. */
+  canProject: boolean;
   onSave(draft: TaskDraft): Promise<void>;
   onClose(): void;
 }
@@ -23,8 +28,10 @@ const POINT_CHIPS = [
   { v: 20, label: "20 project" },
 ];
 const TIME_CHIPS = [15, 30, 60];
+/** Select value for "make a new one". */
+const NEW = "__new__";
 
-export function TaskEditor({ task, date, projectId, profiles, groups, projects, onSave, onClose }: Props) {
+export function TaskEditor({ task, rule, date, projectId, profiles, groups, projects, canProject, onSave, onClose }: Props) {
   const [title, setTitle] = useState(task?.title ?? "");
   const [notes, setNotes] = useState(task?.notes ?? "");
   const [points, setPoints] = useState(String(task?.points ?? 5));
@@ -37,8 +44,12 @@ export function TaskEditor({ task, date, projectId, profiles, groups, projects, 
     task && task.status !== "done" ? task.status : date ? "ready" : "backlog",
   );
   const [repeat, setRepeat] = useState<Cadence | "none">("none");
+  const [weekday, setWeekday] = useState(rule?.weekday ? String(rule.weekday) : "");
   const [project, setProject] = useState(task?.project_id ?? projectId ?? "");
   const [deadline, setDeadline] = useState(task?.deadline ?? "");
+  const [newProject, setNewProject] = useState("");
+  const [newGroupId, setNewGroupId] = useState(groups[0]?.id ?? NEW);
+  const [newGroup, setNewGroup] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -46,6 +57,9 @@ export function TaskEditor({ task, date, projectId, profiles, groups, projects, 
   const showLane = !isInstance && task?.status !== "done" && repeat === "none";
   // One-off tasks only: a repeating task has no finish line to file under a project.
   const oneOff = !isInstance && repeat === "none";
+  // A finished task stays what it was. Anything else can be turned into a repeat.
+  const canRepeat = !isInstance && task?.status !== "done";
+  const weekly = repeat === "weekly" || (isInstance && rule?.cadence === "weekly");
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -54,6 +68,9 @@ export function TaskEditor({ task, date, projectId, profiles, groups, projects, 
     if (!(p >= 1 && p <= 200)) return setError("Points need to be between 1 and 200.");
     const est = estimate ? Math.round(Number(estimate)) : null;
     if (est !== null && !(est >= 1 && est <= 1440)) return setError("Time estimate needs to be between 1 and 1440 minutes.");
+    const creating = oneOff && project === NEW;
+    if (creating && !newProject.trim()) return setError("Give the new project a name.");
+    if (creating && newGroupId === NEW && !newGroup.trim()) return setError("Give the new group a name.");
     setBusy(true);
     setError("");
     try {
@@ -68,7 +85,11 @@ export function TaskEditor({ task, date, projectId, profiles, groups, projects, 
         remind_at: remind || null,
         status,
         repeat,
-        project_id: oneOff ? project || null : null,
+        weekday: weekly && weekday ? Number(weekday) : null,
+        project_id: oneOff && !creating ? project || null : null,
+        new_project: creating
+          ? { name: newProject.trim(), group_id: newGroupId === NEW ? null : newGroupId, group_name: newGroup.trim() }
+          : null,
         deadline: oneOff ? deadline || null : null,
       });
       onClose();
@@ -131,7 +152,7 @@ export function TaskEditor({ task, date, projectId, profiles, groups, projects, 
               <option value="screenshot">Screenshot (online)</option>
             </select>
           </div>
-          {!task && (
+          {canRepeat && (
             <div className="field">
               <label htmlFor="fRepeat">Repeats</label>
               <select id="fRepeat" value={repeat} onChange={(e) => setRepeat(e.target.value as Cadence | "none")}>
@@ -142,7 +163,20 @@ export function TaskEditor({ task, date, projectId, profiles, groups, projects, 
               </select>
             </div>
           )}
-          {repeat === "none" && (
+          {weekly && (
+            <div className="field">
+              <label htmlFor="fWeekday">{isInstance ? "Repeats weekly on" : "On"}</label>
+              <select id="fWeekday" value={weekday} onChange={(e) => setWeekday(e.target.value)}>
+                <option value="">Any day that week</option>
+                {WEEKDAYS.map((d, i) => (
+                  <option key={d} value={i + 1}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {repeat === "none" && !(weekly && weekday) && (
             <div className="field">
               <label htmlFor="fPlanned">Planned day (optional)</label>
               <input id="fPlanned" type="date" value={planned} onChange={(e) => setPlanned(e.target.value)} />
@@ -154,7 +188,7 @@ export function TaskEditor({ task, date, projectId, profiles, groups, projects, 
               <input id="fDeadline" type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
             </div>
           )}
-          {oneOff && projects.length > 0 && (
+          {oneOff && canProject && (
             <div className="field">
               <label htmlFor="fProject">Project (optional)</label>
               <select id="fProject" value={project} onChange={(e) => setProject(e.target.value)}>
@@ -170,7 +204,37 @@ export function TaskEditor({ task, date, projectId, profiles, groups, projects, 
                       ))}
                   </optgroup>
                 ))}
+                <option value={NEW}>New project...</option>
               </select>
+            </div>
+          )}
+          {oneOff && canProject && project === NEW && (
+            <div className="field">
+              <label htmlFor="fNewProject">New project name</label>
+              <input id="fNewProject" maxLength={60} autoComplete="off" value={newProject} onChange={(e) => setNewProject(e.target.value)} />
+            </div>
+          )}
+          {oneOff && canProject && project === NEW && (
+            <div className="field">
+              <label htmlFor="fNewGroupId">In group</label>
+              <select id="fNewGroupId" value={newGroupId} onChange={(e) => setNewGroupId(e.target.value)}>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+                <option value={NEW}>New group...</option>
+              </select>
+              {newGroupId === NEW && (
+                <input
+                  aria-label="New group name"
+                  placeholder="Group name, like House Projects"
+                  maxLength={60}
+                  autoComplete="off"
+                  value={newGroup}
+                  onChange={(e) => setNewGroup(e.target.value)}
+                />
+              )}
             </div>
           )}
           <div className="field">
@@ -188,7 +252,14 @@ export function TaskEditor({ task, date, projectId, profiles, groups, projects, 
             </div>
           )}
         </div>
-        {repeat !== "none" && <p className="note">A fresh copy appears each period. If it is not finished, it rolls over until it is.</p>}
+        {repeat !== "none" && (
+          <p className="note">
+            {weekly && weekday
+              ? `A fresh copy lands on ${WEEKDAYS[Number(weekday) - 1]} each week. If it is not finished, it rolls over until it is.`
+              : "A fresh copy appears each period. If it is not finished, it rolls over until it is."}
+            {task ? " This task becomes the first copy." : ""}
+          </p>
+        )}
         {error && <p className="err" role="alert">{error}</p>}
         <div className="foot">
           <button type="button" className="btn" onClick={onClose}>
