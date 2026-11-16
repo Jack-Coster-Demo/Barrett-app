@@ -105,6 +105,8 @@ export interface ShoppingItem {
   id: string;
   title: string;
   store: string | null;
+  /** Optional web address for the item, always http or https. */
+  link: string | null;
   added_by: string | null;
   bought_at: string | null;
   bought_by: string | null;

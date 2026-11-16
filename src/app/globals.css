@@ -192,6 +192,11 @@ a { color: var(--accent); }
 .addrow { display: flex; flex-wrap: wrap; gap: 8px; }
 .addrow input { flex: 3 1 200px; min-width: 0; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 9px 12px; }
 .addrow input.store { flex: 1 1 150px; }
+.addrow input.link { flex: 1 1 100%; }
+.addrow input[aria-invalid="true"] { border-color: var(--second); }
+.hint.bad { margin: -6px 0 0; font-size: 13px; color: var(--second-ink); }
+.steps .box.square { border-radius: 7px; }
+.itemlink { align-self: flex-start; max-width: 100%; font-size: 13px; color: var(--accent); overflow-wrap: anywhere; }
 
 /* dialogs */
 .overlay { position: fixed; inset: 0; background: rgba(10, 22, 30, 0.5); display: grid; place-items: center; padding: 16px; z-index: 20; }

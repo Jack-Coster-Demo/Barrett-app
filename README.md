@@ -18,7 +18,7 @@ Built with Next.js, Supabase and DnD Kit. Deployed on Vercel.
 - **Live sync:** changes show up on the other device within a second or so.
 - **Login:** email and password, with an optional second step by authenticator app or text message.
 - **Projects:** groups hold projects, projects hold tasks (House Projects, Closets, "Buy rod for the front hall closet"). Project tasks are regular tasks with points and proof, plus an optional finish-by date.
-- **Shopping list:** one shared list, optionally sorted by store. Tick items off as you buy them.
+- **Shopping list:** one shared list, optionally sorted by store, with an optional link per item. Tick the checkbox when an item has been purchased.
 - **Personal goals:** "a number of times a week" (gym) or "working toward a date" (a race, a certificate). Logging a session earns points, once a day per goal, with no photo. Goals can belong to one person or both.
 - **Light and dark mode.**
 
@@ -108,6 +108,7 @@ Periods use Pacific time. To change that, edit `period_start` in the migration.
 ```
 supabase/migrations/0001_init.sql   tables, access rules, storage bucket, functions
 supabase/migrations/0002_...sql     projects, shopping list, goals
+supabase/migrations/0003_...sql     link on shopping items
 src/proxy.ts                        session refresh and sign-in redirects
 src/app/                            pages: board, login, second step, account
 src/components/BarrettApp.tsx       data loading, live sync, scoreboard, board and week views

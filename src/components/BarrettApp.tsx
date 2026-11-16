@@ -421,8 +421,8 @@ export default function BarrettApp({ me, profiles }: { me: Profile; profiles: Pr
   };
 
   const shoppingActions: ShoppingActions = {
-    add: (title, store) =>
-      write("The item could not be added.", sb.from("shopping_items").insert({ title, store: store || null, added_by: me.id })),
+    add: (title, store, link) =>
+      write("The item could not be added.", sb.from("shopping_items").insert({ title, store: store || null, link, added_by: me.id })),
     toggle(item) {
       const next = item.bought_at ? { bought_at: null, bought_by: null } : { bought_at: stamp(), bought_by: me.id };
       setShopping((list) => list.map((i) => (i.id === item.id ? { ...i, ...next } : i)));
