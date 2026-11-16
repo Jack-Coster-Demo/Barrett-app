@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { addDays, clock, dayLabel, fromYmd, minutesLabel, monthStart, weekStart, ymd } from "@/lib/dates";
+import { addDays, clock, dayLabel, fromYmd, minutesLabel, monthStart, weekdayName, weekStart, ymd } from "@/lib/dates";
 import { shrinkImage } from "@/lib/image";
 import {
   LANES,
@@ -46,6 +46,12 @@ interface Toast {
 }
 
 const CADENCE_LABEL: Record<Cadence, string> = { daily: "Daily", weekly: "Weekly", monthly: "Monthly" };
+
+/** "Weekly", or "Weekly on Tue" when the repeat is tied to a day. */
+function ruleLabel(rule: Rule): string {
+  if (rule.cadence === "weekly" && rule.weekday) return `Weekly on ${weekdayName(rule.weekday).slice(0, 3)}`;
+  return CADENCE_LABEL[rule.cadence];
+}
 
 function periodStart(cadence: Cadence, now: Date): string {
   if (cadence === "daily") return ymd(now);
@@ -92,7 +98,8 @@ export default function BarrettApp({ me, profiles }: { me: Profile; profiles: Pr
     const [t, c, r, f, p, pt, g, pr, sh, go, gc] = await Promise.all([
       sb.from("tasks").select("*").or(`completed_at.is.null,completed_at.gte.${since}`).order("created_at"),
       sb.from("task_completions").select("*").gte("completed_at", since),
-      sb.from("recurring_rules").select("id, title, points, cadence, active").eq("active", true).order("created_at"),
+      // All columns, so this keeps working on a database that does not have the weekday column yet.
+      sb.from("recurring_rules").select("*").eq("active", true).order("created_at"),
       sb.from("focus_sessions").select("*").is("ended_at", null),
       sb.from("prizes").select("*"),
       // Project tasks of any age, so a project's progress counts work finished long ago.
@@ -313,35 +320,87 @@ export default function BarrettApp({ me, profiles }: { me: Profile; profiles: Pr
       // These columns only exist once the 0002 migration has been run.
       ...(extrasError ? {} : { project_id: draft.project_id, deadline: draft.deadline }),
     };
-    let error: { message: string } | null;
-    if (existing) {
+    let error: { message: string } | null = null;
+    let note = "";
+    if (draft.new_project && !extrasError) {
+      // File the task under a project that is made on the spot, and its group too if that is new.
+      let groupId = draft.new_project.group_id;
+      if (!groupId) {
+        const g = await sb.from("project_groups").insert({ name: draft.new_project.group_name, created_by: me.id }).select("id").single();
+        if (g.error) throw new Error(`The group could not be created. ${g.error.message}`);
+        groupId = g.data.id as string;
+      }
+      const made = await sb.from("projects").insert({ name: draft.new_project.name, group_id: groupId, created_by: me.id }).select("id").single();
+      if (made.error) throw new Error(`The project could not be created. ${made.error.message}`);
+      fields.project_id = made.data.id as string;
+      note = ` Filed under the new project "${draft.new_project.name}".`;
+    }
+    const rule = existing?.recurring_rule_id ? ruleById.get(existing.recurring_rule_id) : undefined;
+    // The date a weekly-on-a-day task sits on this week.
+    const thisWeek = (weekday: number) => ymd(addDays(weekStart(new Date()), weekday - 1));
+    const ruleFields = {
+      title: draft.title,
+      points: draft.points,
+      proof_type: draft.proof_type,
+      remind_at: draft.remind_at,
+      owner_id: draft.owner_id,
+    };
+    if (existing && !existing.recurring_rule_id && draft.repeat !== "none" && existing.status !== "done") {
+      // A one-off task becomes repeating: it turns into this period's copy of a new repeat.
+      const made = await sb
+        .from("recurring_rules")
+        .insert({ ...ruleFields, cadence: draft.repeat, ...(draft.weekday ? { weekday: draft.weekday } : {}), created_by: me.id })
+        .select("id")
+        .single();
+      error = made.error;
+      if (!error && made.data) {
+        const day = draft.weekday ? thisWeek(draft.weekday) : null;
+        ({ error } = await sb
+          .from("tasks")
+          .update({
+            ...fields,
+            // Its day this week, or today if that day has already gone by.
+            planned_date: day && day > today ? day : today,
+            status: existing.status === "backlog" ? "ready" : existing.status,
+            recurring_rule_id: made.data.id,
+            due_date: periodStart(draft.repeat, new Date()),
+            ...(existing.points !== draft.points ? { flag_by: null, flag_kind: null } : {}),
+          })
+          .eq("id", existing.id));
+      }
+    } else if (existing) {
       const keepsLane = existing.status === "done" || !!existing.recurring_rule_id;
+      const dayChanged = rule?.cadence === "weekly" && (rule.weekday ?? null) !== draft.weekday;
       ({ error } = await sb
         .from("tasks")
         .update({
           ...fields,
           ...(keepsLane ? {} : { status: draft.status }),
+          // A new day of the week moves the open copy to that day.
+          ...(dayChanged && draft.weekday && existing.status !== "done" ? { planned_date: thisWeek(draft.weekday) } : {}),
           // changed points answer the flag
           ...(existing.points !== draft.points ? { flag_by: null, flag_kind: null } : {}),
         })
         .eq("id", existing.id));
+      if (!error && dayChanged && rule) {
+        ({ error } = await sb.from("recurring_rules").update({ weekday: draft.weekday }).eq("id", rule.id));
+      }
     } else if (draft.repeat !== "none") {
       ({ error } = await sb.from("recurring_rules").insert({
-        title: draft.title,
-        points: draft.points,
+        ...ruleFields,
         cadence: draft.repeat,
-        proof_type: draft.proof_type,
-        remind_at: draft.remind_at,
-        owner_id: draft.owner_id,
+        ...(draft.weekday ? { weekday: draft.weekday } : {}),
         created_by: me.id,
       }));
       if (!error) ({ error } = await sb.rpc("generate_recurring"));
+      // The database starts a repeat next week when its day has already gone by.
+      if (draft.weekday && thisWeek(draft.weekday) < today) note = ` Starts next ${weekdayName(draft.weekday)}.`;
     } else {
       ({ error } = await sb.from("tasks").insert({ ...fields, status: draft.status, created_by: me.id }));
     }
     if (error) throw new Error(`The task could not be saved. ${error.message}`);
     await load();
-    setToast({ head: existing ? "Saved" : "Added", msg: `"${draft.title}"` });
+    setToast({ head: existing ? "Saved" : "Added", msg: `"${draft.title}"${note}` });
   }
 
   async function complete(task: Task, userIds: string[], file: File) {
@@ -423,6 +482,7 @@ export default function BarrettApp({ me, profiles }: { me: Profile; profiles: Pr
   const shoppingActions: ShoppingActions = {
     add: (title, store, link) =>
       write("The item could not be added.", sb.from("shopping_items").insert({ title, store: store || null, link, added_by: me.id })),
+    update: (item, fields) => write("The item could not be updated.", sb.from("shopping_items").update(fields).eq("id", item.id)),
     toggle(item) {
       const next = item.bought_at ? { bought_at: null, bought_by: null } : { bought_at: stamp(), bought_by: me.id };
       setShopping((list) => list.map((i) => (i.id === item.id ? { ...i, ...next } : i)));
@@ -691,7 +751,7 @@ export default function BarrettApp({ me, profiles }: { me: Profile; profiles: Pr
               {rules.map((r) => (
                 <li key={r.id}>
                   <span>
-                    {r.title} · {CADENCE_LABEL[r.cadence]} · {r.points} pts
+                    {r.title} · {ruleLabel(r)} · {r.points} pts
                   </span>
                   <button className="btn small danger" onClick={() => stopRule(r)}>
                     Stop repeating
@@ -717,7 +777,7 @@ export default function BarrettApp({ me, profiles }: { me: Profile; profiles: Pr
                 <span>
                   {t.title}
                   <small>
-                    {CADENCE_LABEL[rule.cadence]} · {done ? `${by} +${t.points}` : `${t.points} pts`}
+                    {ruleLabel(rule)} · {done ? `${by} +${t.points}` : `${t.points} pts`}
                     {!done && t.remind_at ? ` · remind ${clock(t.remind_at)}` : ""}
                     {rolled && t.due_date ? (
                       <>
@@ -865,11 +925,13 @@ export default function BarrettApp({ me, profiles }: { me: Profile; profiles: Pr
       {editor && (
         <TaskEditor
           task={editor.task}
+          rule={editor.task?.recurring_rule_id ? ruleById.get(editor.task.recurring_rule_id) : undefined}
           date={editor.date}
           projectId={editor.projectId}
           profiles={profiles}
           groups={liveGroups}
           projects={liveProjects}
+          canProject={!extrasError}
           onSave={(draft) => save(draft, editor.task)}
           onClose={() => setEditor(null)}
         />

@@ -5,6 +5,7 @@ import type { Profile, ShoppingItem } from "@/lib/types";
 
 export interface ShoppingActions {
   add(title: string, store: string, link: string | null): Promise<boolean>;
+  update(item: ShoppingItem, fields: { title: string; store: string | null; link: string | null }): Promise<boolean>;
   toggle(item: ShoppingItem): void;
   remove(item: ShoppingItem): void;
   clearBought(): void;
@@ -71,8 +72,69 @@ export function ShoppingView({ items, people, loaded, actions }: Props) {
     }
   }
 
+  const [editing, setEditing] = useState<{ id: string; title: string; store: string; link: string } | null>(null);
+  const editLink = editing ? cleanLink(editing.link) : "";
+
+  async function saveEdit(e: React.FormEvent, item: ShoppingItem) {
+    e.preventDefault();
+    if (!editing || !editing.title.trim() || editLink === null || busy) return;
+    setBusy(true);
+    const ok = await actions.update(item, { title: editing.title.trim(), store: editing.store.trim() || null, link: editLink || null });
+    setBusy(false);
+    if (ok) setEditing(null);
+  }
+
   const row = (i: ShoppingItem) => {
     const who = i.added_by ? people.get(i.added_by) : undefined;
+    if (editing?.id === i.id) {
+      return (
+        <li key={i.id}>
+          <form className="addrow edit" onSubmit={(e) => saveEdit(e, i)}>
+            <input
+              aria-label="Item"
+              maxLength={90}
+              autoComplete="off"
+              autoFocus
+              value={editing.title}
+              onChange={(e) => setEditing({ ...editing, title: e.target.value })}
+            />
+            <input
+              className="store"
+              aria-label="Store (optional)"
+              placeholder="Store (optional)"
+              maxLength={40}
+              autoComplete="off"
+              list="storeList"
+              value={editing.store}
+              onChange={(e) => setEditing({ ...editing, store: e.target.value })}
+            />
+            <input
+              className="link"
+              type="text"
+              inputMode="url"
+              autoCapitalize="none"
+              spellCheck={false}
+              aria-label="Link (optional)"
+              aria-invalid={editLink === null}
+              placeholder="Link (optional)"
+              maxLength={2000}
+              autoComplete="off"
+              value={editing.link}
+              onChange={(e) => setEditing({ ...editing, link: e.target.value })}
+            />
+            {editLink === null && <p className="hint bad">That link does not look like a web address.</p>}
+            <div className="foot">
+              <button type="button" className="btn small" onClick={() => setEditing(null)}>
+                Cancel
+              </button>
+              <button type="submit" className="btn small primary" disabled={busy || !editing.title.trim() || editLink === null}>
+                Save
+              </button>
+            </div>
+          </form>
+        </li>
+      );
+    }
     return (
       <li key={i.id} className={i.bought_at ? "isdone" : ""}>
         <button
@@ -94,6 +156,13 @@ export function ShoppingView({ items, people, loaded, actions }: Props) {
           )}
         </div>
         {who && <span className={`dot ${who.color}`} title={`Added by ${who.display_name}`} />}
+        <button
+          className="icon"
+          aria-label={`Edit ${i.title}`}
+          onClick={() => setEditing({ id: i.id, title: i.title, store: i.store ?? "", link: i.link ?? "" })}
+        >
+          Edit
+        </button>
         <button className="icon" aria-label={`Remove ${i.title}`} onClick={() => actions.remove(i)}>
           ✕
         </button>
